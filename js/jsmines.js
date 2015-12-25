@@ -52,7 +52,7 @@ function createJsMines(config, eventListeners) {
   var Mine = 9;
 
   // A game state
-  var boardSize, board, markers, cellsLeft, mines, timer, time, gameStarted = false;
+  var boardSize, board, markers, cellsLeft, mines, timer, time, gameStarted, gameStopped;
  
   setConfig(config);
 
@@ -72,7 +72,7 @@ function createJsMines(config, eventListeners) {
     if (!cfg)
       throw new Error("Configuration is not provided.");
 
-    if (!cfg.size || (cfg.size[0] || 0) < 1 || (cfg.size[1] || 0) < 1)
+    if (!cfg.size || (cfg.size[0] || 0) < 3 || (cfg.size[1] || 0) < 3)
       throw new Error("Invalid board size.");
 
     if ((cfg.mines || 0) < 1)
@@ -83,7 +83,10 @@ function createJsMines(config, eventListeners) {
      throw new Error("There is no free space on the board.");
 
     boardSize = newBoardSize;
-    config = extend({}, cfg);
+    config = {
+      size: [+cfg.size[0], +cfg.size[1]],
+      mines: +cfg.mines
+    };
 
     reset();
   }
@@ -92,6 +95,7 @@ function createJsMines(config, eventListeners) {
     if (gameStarted)
       stop();
 
+    gameStopped = false;
     board = newArray(boardSize, 0);
     markers = newArray(boardSize, CellMarker.None);
     mines = config.mines;
@@ -103,7 +107,7 @@ function createJsMines(config, eventListeners) {
 
   /* Starts a new game (starts a timer, opens the first cell). */
   function startGame(startPosition) {
-    if (gameStarted)
+    if (gameStarted || gameStopped)
       return;
 
     gameStarted = true;
@@ -111,23 +115,12 @@ function createJsMines(config, eventListeners) {
     time = +new Date();
     timer = window.setInterval(updateStatus, 1000);
 
-    var forbiddenArea = getNearest(startPosition);
-    forbiddenArea.push(getIndex(startPosition));
-    for (var i = 0; i < config.mines; i++) {
-      (function addMine() {
-        var index = ~~(Math.random() * boardSize);
-        if (forbiddenArea.indexOf(index) >= 0 || hasMine(board[index]))
-          return addMine();
+    addMines(startPosition);
 
-        board[index] = Mine;
-        getNearest(getPosition(index)).forEach(function(i) { board[i]++; });
-      })();
-    }
-    
     eventListeners.onGameStarted();
     updateStatus();
   }
-
+  
   function markCell(position) {
     var index = getIndex(position);
     if (index < 0)
@@ -148,6 +141,9 @@ function createJsMines(config, eventListeners) {
   }
 
   function openCell(position) {
+    if (gameStopped)
+        return;
+        
     var index = getIndex(position);
     if (index < 0)
       throw new Error("Invalid position");
@@ -180,10 +176,39 @@ function createJsMines(config, eventListeners) {
   //          Internal functions           //
   ///////////////////////////////////////////
   
+  function addMines(startPosition) {
+    var forbiddenArea = boardSize - config.mines < 9
+      ? []
+      : getNearest(startPosition);
+
+    forbiddenArea.push(getIndex(startPosition));
+    forbiddenArea.sort();
+    
+    for (var i = config.mines; i--;)
+      board[i] = Mine;
+        
+    for (var i = board.length - forbiddenArea.length; i--;) {
+      var random = Math.random() * (i + 1) | 0;
+      var tmp = board[i];
+      board[i] = board[random];
+      board[random] = tmp;
+    }
+
+    for (var i = 1, bLen = board.length, fLen = forbiddenArea.length; i <= fLen; i++) {
+      var index = forbiddenArea[fLen - i];
+      board[bLen - i] = board[index];
+      board[index] = 0;
+    }
+    
+    for (var index = board.length; index--;)
+      if (hasMine(board[index]))
+        getNearest(getPosition(index)).forEach(function(i) { board[i]++; });
+  }
+
   /** Sets a game status as updated */
   function updateStatus() {
     var status = {
-      gameStarted: gameStarted,
+      gameStarted: !!gameStarted,
       mines: mines,
       cellsLeft: cellsLeft,
       time: time === void 0
@@ -198,6 +223,7 @@ function createJsMines(config, eventListeners) {
       return;
       
     gameStarted = false;
+    gameStopped = true;
 
     if (timer) {
       window.clearInterval(timer);
